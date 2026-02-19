@@ -22,6 +22,11 @@ def init_dashboard(database: DatabaseManager, config: Config, bot_state: dict):
     logger.info(f"Dashboard init: bot_state has {len(bot_state)} keys: {list(bot_state.keys())}")
 
 
+@app.get("/health")
+async def health():
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
