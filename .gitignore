@@ -1,0 +1,6 @@
+.env
+trading_bot.db
+__pycache__/
+*.pyc
+.DS_Store
+hyperopt_results.json

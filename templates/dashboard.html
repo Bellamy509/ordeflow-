@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrderFlow Trading Bot</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0a0e17; color: #e1e5ee; min-height: 100vh; }
+
+        .header { background: #111827; border-bottom: 1px solid #1f2937; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 16px; font-weight: 600; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .mode { padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .mode-paper { background: #1e3a5f; color: #60a5fa; }
+        .mode-live { background: #5f1e1e; color: #f87171; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+        .dot-green { background: #34d399; }
+        .dot-red { background: #f87171; }
+        .dot-yellow { background: #fbbf24; }
+        .btn-danger { background: #dc2626; color: white; border: none; padding: 6px 16px; border-radius: 5px; cursor: pointer; font-weight: 700; font-size: 12px; font-family: inherit; }
+        .btn-danger:hover { background: #ef4444; }
+
+        .portfolio-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 24px; background: #0d1220; }
+        .pcard { background: #111827; border: 1px solid #1f2937; border-radius: 6px; padding: 12px 14px; }
+        .pcard .lb { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.8px; }
+        .pcard .vl { font-size: 20px; font-weight: 700; margin-top: 2px; }
+
+        .markets-section { padding: 12px 24px; }
+        .markets-section h2 { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .markets-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+
+        .market-card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; overflow: hidden; }
+        .market-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid #1f2937; background: #0d1220; }
+        .market-name { font-size: 14px; font-weight: 700; }
+        .market-price { font-size: 16px; font-weight: 700; }
+        .market-body { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #1f2937; }
+        .market-body > div { background: #111827; padding: 10px 12px; }
+        .market-body .ml { font-size: 9px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+        .market-body .mv { font-size: 15px; font-weight: 600; margin-top: 2px; }
+        .market-footer { padding: 6px 14px; font-size: 10px; color: #4b5563; border-top: 1px solid #1f2937; display: flex; justify-content: space-between; }
+
+        .positive { color: #34d399; }
+        .negative { color: #f87171; }
+        .neutral { color: #60a5fa; }
+        .white { color: #e1e5ee; }
+
+        .section { padding: 0 24px 12px; }
+        .section h2 { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 0; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { text-align: left; padding: 7px 12px; border-bottom: 1px solid #1f2937; color: #6b7280; font-size: 10px; text-transform: uppercase; background: #0d1220; }
+        td { padding: 7px 12px; border-bottom: 1px solid #0d1220; }
+        tr:hover { background: #1a2236; }
+        .signal-badge { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+        .signal-buy { background: #064e3b; color: #34d399; }
+        .signal-sell { background: #4c0519; color: #fb7185; }
+        .sym-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; background: #1e293b; color: #94a3b8; margin-right: 4px; }
+
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 24px 12px; }
+        .signals-log { max-height: 280px; overflow-y: auto; }
+        .log-entry { padding: 5px 12px; border-left: 3px solid #1f2937; margin-bottom: 3px; font-size: 11px; line-height: 1.4; }
+        .log-entry.buy { border-color: #34d399; }
+        .log-entry.sell { border-color: #f87171; }
+
+        .footer { padding: 10px 24px; text-align: center; color: #374151; font-size: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>OrderFlow Trading Bot</h1>
+        <div class="header-right">
+            <span id="uptime" style="font-size:11px;color:#6b7280;">0h 0m 0s</span>
+            <span id="mode-badge" class="mode mode-paper">PAPER</span>
+            <span><span id="status-dot" class="status-dot dot-yellow"></span><span id="status-text">Connecting...</span></span>
+            <button class="btn-danger" onclick="emergencyClose()">EMERGENCY CLOSE</button>
+        </div>
+    </div>
+
+    <div class="portfolio-bar">
+        <div class="pcard">
+            <div class="lb">Balance</div>
+            <div class="vl white" id="v-balance">---</div>
+        </div>
+        <div class="pcard">
+            <div class="lb">Today PnL</div>
+            <div class="vl" id="v-pnl">---</div>
+        </div>
+        <div class="pcard">
+            <div class="lb">Win Rate</div>
+            <div class="vl neutral" id="v-winrate">---</div>
+        </div>
+        <div class="pcard">
+            <div class="lb">Trades Today</div>
+            <div class="vl neutral" id="v-trades">0</div>
+        </div>
+    </div>
+
+    <div class="markets-section">
+        <h2>Markets</h2>
+        <div class="markets-grid" id="markets-grid"></div>
+    </div>
+
+    <div class="section" style="padding-top:4px;">
+        <h2>Open Positions (with trailing stop)</h2>
+        <div class="card">
+            <table>
+                <thead><tr><th>ID</th><th>Market</th><th>Side</th><th>Entry</th><th>Size</th><th>SL</th><th>TP</th><th>Strategy</th><th>uPnL</th></tr></thead>
+                <tbody id="positions-body"><tr><td colspan="9" style="color:#6b7280;padding:12px;">No open positions</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="two-col">
+        <div>
+            <h2 style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Recent Signals</h2>
+            <div class="card signals-log" id="signals-log" style="padding:6px 0;">
+                <div class="log-entry" style="color:#6b7280">Waiting for signals...</div>
+            </div>
+        </div>
+        <div>
+            <h2 style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Trade History</h2>
+            <div class="card" style="max-height:280px;overflow-y:auto;">
+                <table>
+                    <thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Strategy</th></tr></thead>
+                    <tbody id="history-body"><tr><td colspan="6" style="color:#6b7280;padding:12px;">No trades yet</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        OrderFlow Bot v2.0 &mdash; Multi-Market | Derivatives | Sentiment | Regime | MTF | AI | Trailing Stop | Telegram
+        &mdash; <span id="health-status" style="color:#34d399">healthy</span>
+    </div>
+
+    <script>
+        async function fetchJSON(url) { return (await fetch(url)).json(); }
+        function fmt(n, d=2) { return n != null ? Number(n).toFixed(d) : '---'; }
+        function pnlClass(v) { return v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral'; }
+        function shortSym(s) { return s.split('/')[0]; }
+
+        const regimeColors = {
+            trending_up:'#34d399', trending_down:'#f87171', ranging:'#60a5fa',
+            volatile:'#fbbf24', low_volume:'#6b7280'
+        };
+        const regimeIcons = {
+            trending_up:'UP', trending_down:'DN', ranging:'RNG', volatile:'VOL', low_volume:'LOW'
+        };
+
+        function renderMarkets(markets, positions, status) {
+            const grid = document.getElementById('markets-grid');
+            if (!markets || Object.keys(markets).length === 0) {
+                grid.innerHTML = '<div style="color:#6b7280;padding:12px;">No markets connected</div>';
+                return;
+            }
+            const derivs = status.derivatives || {};
+            const sents = status.sentiment || {};
+            const regimes = status.regimes || {};
+            const preds = status.ai_predictions || {};
+
+            grid.innerHTML = Object.entries(markets).map(([sym, m]) => {
+                const name = shortSym(sym);
+                const dCls = pnlClass(m.delta);
+                const cCls = pnlClass(m.cvd);
+                const openPos = positions.filter(p => p.symbol === sym && p.status === 'open');
+                const posInfo = openPos.length > 0
+                    ? openPos.map(p => `<span class="signal-badge signal-${p.side}">${p.side.toUpperCase()}</span>`).join(' ')
+                    : '<span style="color:#374151">--</span>';
+
+                const d = derivs[sym] || {};
+                const fr = d.funding_rate ? (d.funding_rate * 100).toFixed(4) + '%' : '--';
+                const oi = d.open_interest ? Number(d.open_interest).toLocaleString() : '--';
+                const ls = d.long_short_ratio ? Number(d.long_short_ratio).toFixed(2) : '--';
+
+                const s = sents[sym] || {};
+                const sentLabel = s.label || 'neutral';
+                const sentColor = sentLabel === 'bullish' ? '#34d399' : sentLabel === 'bearish' ? '#f87171' : '#6b7280';
+
+                const reg = regimes[sym] || 'ranging';
+                const regColor = regimeColors[reg] || '#6b7280';
+                const regText = regimeIcons[reg] || reg;
+
+                const pred = preds[sym] || {};
+                const predDir = pred.direction || 'neutral';
+                const predConf = pred.confidence || 0;
+                const predColor = predDir === 'up' ? '#34d399' : predDir === 'down' ? '#f87171' : '#6b7280';
+
+                return `<div class="market-card">
+                    <div class="market-header">
+                        <span class="market-name">${name} <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:${regColor}22;color:${regColor};font-weight:600;">${regText}</span></span>
+                        <span class="market-price white">$${fmt(m.last_price)}</span>
+                    </div>
+                    <div class="market-body" style="grid-template-columns:repeat(4,1fr);">
+                        <div><div class="ml">Delta</div><div class="mv ${dCls}">${fmt(m.delta, 2)}</div></div>
+                        <div><div class="ml">CVD</div><div class="mv ${cCls}">${fmt(m.cvd, 2)}</div></div>
+                        <div><div class="ml">Funding</div><div class="mv" style="font-size:13px;">${fr}</div></div>
+                        <div><div class="ml">L/S Ratio</div><div class="mv" style="font-size:13px;">${ls}</div></div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#1f2937;">
+                        <div style="background:#111827;padding:6px 12px;"><div class="ml">Open Interest</div><div class="mv" style="font-size:12px;">${oi}</div></div>
+                        <div style="background:#111827;padding:6px 12px;"><div class="ml">Sentiment</div><div class="mv" style="font-size:12px;color:${sentColor}">${sentLabel} ${s.mentions ? '('+s.mentions+')' : ''}</div></div>
+                        <div style="background:#111827;padding:6px 12px;"><div class="ml">AI Predict</div><div class="mv" style="font-size:12px;color:${predColor}">${predDir} ${predConf}%</div></div>
+                        <div style="background:#111827;padding:6px 12px;"><div class="ml">Position</div><div class="mv" style="font-size:12px;">${posInfo}</div></div>
+                    </div>
+                    <div class="market-footer"><span>${m.ticks.toLocaleString()} ticks | ${m.candles} candles</span></div>
+                </div>`;
+            }).join('');
+        }
+
+        async function refresh() {
+            try {
+                const [status, positions, history, signals, stats] = await Promise.all([
+                    fetchJSON('/api/status'),
+                    fetchJSON('/api/positions'),
+                    fetchJSON('/api/history'),
+                    fetchJSON('/api/signals'),
+                    fetchJSON('/api/stats'),
+                ]);
+
+                document.getElementById('uptime').textContent = status.uptime || '---';
+
+                const badge = document.getElementById('mode-badge');
+                badge.textContent = status.mode.toUpperCase();
+                badge.className = 'mode mode-' + status.mode;
+
+                const dot = document.getElementById('status-dot');
+                const stxt = document.getElementById('status-text');
+                if (status.running) { dot.className = 'status-dot dot-green'; stxt.textContent = 'Running'; }
+                else { dot.className = 'status-dot dot-red'; stxt.textContent = 'Stopped'; }
+
+                document.getElementById('v-balance').textContent = '$' + fmt(status.balance);
+
+                if (stats.today) {
+                    const pEl = document.getElementById('v-pnl');
+                    pEl.textContent = (stats.today.total_pnl >= 0 ? '+' : '') + '$' + fmt(stats.today.total_pnl);
+                    pEl.className = 'vl ' + pnlClass(stats.today.total_pnl);
+                    document.getElementById('v-winrate').textContent = fmt(stats.today.win_rate, 1) + '%';
+                    document.getElementById('v-trades').textContent = stats.today.total_trades;
+                }
+
+                renderMarkets(status.markets, positions, status);
+
+                const hs = document.getElementById('health-status');
+                if (status.health) {
+                    hs.textContent = status.health.status;
+                    hs.style.color = status.health.status === 'healthy' ? '#34d399' : '#fbbf24';
+                }
+
+                // Open Positions
+                const pb = document.getElementById('positions-body');
+                if (positions.length === 0) {
+                    pb.innerHTML = '<tr><td colspan="9" style="color:#6b7280;padding:12px;">No open positions</td></tr>';
+                } else {
+                    pb.innerHTML = positions.map(p => {
+                        const sc = p.side === 'buy' ? 'signal-buy' : 'signal-sell';
+                        const mkt = status.markets[p.symbol];
+                        const curPrice = mkt ? mkt.last_price : p.entry_price;
+                        let upnl = 0;
+                        if (p.side === 'buy') upnl = (curPrice - p.entry_price) * p.size;
+                        else upnl = (p.entry_price - curPrice) * p.size;
+                        const pc = pnlClass(upnl);
+                        return `<tr>
+                            <td>${p.id}</td>
+                            <td><span class="sym-badge">${shortSym(p.symbol)}</span></td>
+                            <td><span class="signal-badge ${sc}">${p.side.toUpperCase()}</span></td>
+                            <td>$${fmt(p.entry_price)}</td>
+                            <td>${fmt(p.size, 6)}</td>
+                            <td>$${fmt(p.stop_loss)}</td>
+                            <td>$${fmt(p.take_profit)}</td>
+                            <td>${p.strategy}</td>
+                            <td class="${pc}">$${fmt(upnl)}</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Trade History
+                const hb = document.getElementById('history-body');
+                const closed = history.filter(h => h.status === 'closed');
+                if (closed.length === 0) {
+                    hb.innerHTML = '<tr><td colspan="6" style="color:#6b7280;padding:12px;">No trades yet</td></tr>';
+                } else {
+                    hb.innerHTML = closed.slice(0, 25).map(h => {
+                        const sc = h.side === 'buy' ? 'signal-buy' : 'signal-sell';
+                        const pc = pnlClass(h.pnl);
+                        return `<tr>
+                            <td><span class="sym-badge">${shortSym(h.symbol)}</span></td>
+                            <td><span class="signal-badge ${sc}">${h.side.toUpperCase()}</span></td>
+                            <td>$${fmt(h.entry_price)}</td>
+                            <td>$${fmt(h.exit_price)}</td>
+                            <td class="${pc}">${h.pnl != null ? '$'+fmt(h.pnl) : '---'}</td>
+                            <td>${h.strategy}</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Signals log
+                const sl = document.getElementById('signals-log');
+                if (signals.length === 0) {
+                    sl.innerHTML = '<div class="log-entry" style="color:#6b7280">Waiting for signals...</div>';
+                } else {
+                    sl.innerHTML = signals.slice(0, 40).map(s => {
+                        const cls = s.signal_type.includes('buy') || s.signal_type.includes('bull') || s.signal_type.includes('support') || s.signal_type.includes('long') ? 'buy' : 'sell';
+                        const time = new Date(s.timestamp).toLocaleTimeString();
+                        return `<div class="log-entry ${cls}"><strong>${time}</strong> ${s.signal_type} (${Number(s.strength).toFixed(0)}) @ $${fmt(s.price)} &mdash; ${s.description}</div>`;
+                    }).join('');
+                }
+            } catch(e) { console.error('Refresh error:', e); }
+        }
+
+        async function emergencyClose() {
+            if (!confirm('CLOSE ALL POSITIONS on ALL MARKETS? This cannot be undone.')) return;
+            await fetch('/api/emergency-close', {method:'POST'});
+            alert('Emergency close triggered');
+        }
+
+        setInterval(refresh, 2000);
+        refresh();
+    </script>
+</body>
+</html>
