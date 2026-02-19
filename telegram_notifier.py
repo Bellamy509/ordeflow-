@@ -45,19 +45,29 @@ class TelegramNotifier:
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         if len(text) > 4000:
             text = text[:4000] + "\n..."
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "disable_notification": silent,
-        }
-        try:
-            async with self._session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                if r.status != 200:
+
+        # Try Markdown first, fallback to plain text if it fails
+        for parse_mode in ["Markdown", None]:
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text if parse_mode else text.replace("*", "").replace("`", "").replace("_", ""),
+                "disable_notification": silent,
+            }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            try:
+                async with self._session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    if r.status == 200:
+                        return
+                    if parse_mode:
+                        logger.warning(f"Telegram Markdown failed, retrying plain text...")
+                        continue
                     body = await r.text()
                     logger.warning(f"Telegram send failed ({r.status}): {body}")
-        except Exception as e:
-            logger.warning(f"Telegram error: {e}")
+            except Exception as e:
+                if not parse_mode:
+                    logger.warning(f"Telegram error: {e}")
+                continue
 
     async def notify_trade_open(self, symbol: str, side: str, size: float,
                                 entry: float, sl: float, tp: float, strategy: str,
