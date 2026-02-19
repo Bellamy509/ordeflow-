@@ -154,11 +154,12 @@ class OrderFlowBot:
         self._start_time = time.time()
         self.bot_state["running"] = True
 
+        # Dashboard FIRST so Railway healthcheck passes quickly
         tasks = [
+            asyncio.create_task(self._run_dashboard()),
             asyncio.create_task(self.collector.start()),
             asyncio.create_task(self._position_monitor()),
             asyncio.create_task(self._state_updater()),
-            asyncio.create_task(self._run_dashboard()),
             asyncio.create_task(self.derivatives.start()),
             asyncio.create_task(self.sentiment.start()),
             asyncio.create_task(self.health.start()),
