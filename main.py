@@ -113,30 +113,63 @@ class OrderFlowBot:
         symbols = self.config.symbol_list
 
         logger.info("=" * 60)
-        logger.info("   ORDERFLOW TRADING BOT v2.0 — STARTING")
-        logger.info(f"   Mode:    {self.config.trading_mode.value.upper()}")
-        logger.info(f"   Markets: {len(symbols)} — {symbols}")
-        logger.info(f"   TF:      {self.config.timeframe_minutes}m")
-        logger.info(f"   Risk:    {self.config.risk_per_trade_pct}% | Max pos: {self.config.max_open_positions}")
-        logger.info(f"   Modules: Derivatives, Sentiment, Regime, MTF, AI, Trailing, Telegram, Learner, VProfile, LLM")
+        logger.info("   ORDERFLOW TRADING BOT v3.0 — STARTING")
+        logger.info(f"   Port: {self.config.effective_port}")
         logger.info("=" * 60)
 
-        await self.db.initialize()
-        await self.execution.initialize()
-        balance = await self.execution.get_balance()
-        await self.risk.update_balance(balance)
-        self.bot_state["balance"] = balance
+        # Start dashboard IMMEDIATELY for Railway healthcheck
+        init_dashboard(self.db, self.config, self.bot_state)
 
-        await self.learner.load_history()
+        def _shutdown(sig, frame):
+            self._running = False
 
-        # Restore trade contexts from DB for open positions
-        open_positions = await self.db.get_open_positions()
-        saved_contexts = await self.db.get_all_open_contexts()
-        self.bot_state["_trade_contexts"] = saved_contexts
-        if open_positions:
-            logger.info(f"Restored {len(open_positions)} open position(s) from previous session")
-            for pos in open_positions:
-                logger.info(f"  {pos.symbol} {pos.side.value.upper()} @ ${pos.entry_price:,.2f} (id={pos.id})")
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+
+        tasks = [
+            asyncio.create_task(self._run_dashboard()),
+            asyncio.create_task(self._delayed_init(symbols)),
+        ]
+
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception as e:
+            logger.error(f"Fatal error: {e}")
+        finally:
+            await self._shutdown()
+
+    async def _delayed_init(self, symbols):
+        """Heavy initialization runs AFTER the web server is up."""
+        await asyncio.sleep(2)
+
+        logger.info(f"Initializing bot: {len(symbols)} markets, mode={self.config.trading_mode.value}")
+
+        try:
+            await self.db.initialize()
+        except Exception as e:
+            logger.error(f"DB init failed: {e}")
+
+        try:
+            await self.execution.initialize()
+            balance = await self.execution.get_balance()
+            await self.risk.update_balance(balance)
+            self.bot_state["balance"] = balance
+        except Exception as e:
+            logger.error(f"Execution init failed: {e}")
+
+        try:
+            await self.learner.load_history()
+        except Exception as e:
+            logger.error(f"Learner init failed: {e}")
+
+        try:
+            open_positions = await self.db.get_open_positions()
+            saved_contexts = await self.db.get_all_open_contexts()
+            self.bot_state["_trade_contexts"] = saved_contexts
+            if open_positions:
+                logger.info(f"Restored {len(open_positions)} open position(s)")
+        except Exception as e:
+            logger.error(f"Position restore failed: {e}")
 
         for symbol in symbols:
             pipeline = MarketPipeline(symbol, self.config)
@@ -148,15 +181,13 @@ class OrderFlowBot:
         self.daily_report.set_notify_callback(self.telegram.notify_daily_report)
         self.kill_switch.set_notify_callback(self.telegram.notify_risk_alert)
 
-        init_dashboard(self.db, self.config, self.bot_state)
-
         self._running = True
         self._start_time = time.time()
         self.bot_state["running"] = True
 
-        # Dashboard FIRST so Railway healthcheck passes quickly
-        tasks = [
-            asyncio.create_task(self._run_dashboard()),
+        logger.info(f"All modules ready — starting trading on {symbols}")
+
+        bg_tasks = [
             asyncio.create_task(self.collector.start()),
             asyncio.create_task(self._position_monitor()),
             asyncio.create_task(self._state_updater()),
@@ -168,18 +199,7 @@ class OrderFlowBot:
             asyncio.create_task(self.orderbook.start()),
         ]
 
-        def _shutdown(sig, frame):
-            self._running = False
-
-        signal.signal(signal.SIGINT, _shutdown)
-        signal.signal(signal.SIGTERM, _shutdown)
-
-        try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            logger.error(f"Fatal error: {e}")
-        finally:
-            await self._shutdown()
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
 
     async def _on_tick(self, symbol: str, tick: RawTick):
         pipeline = self.pipelines.get(symbol)
