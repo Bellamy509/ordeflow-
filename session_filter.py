@@ -35,7 +35,7 @@ class SessionFilter:
         "low": 0.4,
     }
 
-    def __init__(self, block_weekends: bool = True, block_low_quality: bool = False):
+    def __init__(self, block_weekends: bool = False, block_low_quality: bool = False):
         self.block_weekends = block_weekends
         self.block_low_quality = block_low_quality
 

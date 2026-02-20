@@ -216,6 +216,13 @@ class OrderFlowBot:
 
     async def _on_candle_close(self, symbol: str, pipeline: MarketPipeline,
                                candle: FootprintCandle):
+        try:
+            await self._process_candle(symbol, pipeline, candle)
+        except Exception as e:
+            logger.error(f"[{symbol}] Candle processing error: {e}")
+
+    async def _process_candle(self, symbol: str, pipeline: MarketPipeline,
+                              candle: FootprintCandle):
         pipeline.candle_count += 1
         pipeline.volume_profile.add_candle(candle)
         logger.info(
@@ -224,56 +231,48 @@ class OrderFlowBot:
             f"Δ:{candle.delta:+.2f} | Vol:{candle.total_volume:.2f}"
         )
 
-        # 1. Kill switch check
+        all_candles = pipeline.footprint.get_last_n_candles(30)
+
+        # 1. ALWAYS detect signals and save to DB (before any filters)
+        detected_signals = pipeline.signals.analyze(candle)
+        regime = pipeline.regime.analyze(all_candles)
+        guidance = pipeline.regime.get_strategy_guidance()
+
+        pipeline.liquidity.update_swings(all_candles)
+        prev = all_candles[-2] if len(all_candles) >= 2 else None
+        sweeps = pipeline.liquidity.detect(candle, prev)
+
+        try:
+            for sw in sweeps:
+                await self.db.log_signal(
+                    signal_type=sw["type"], strength=sw["strength"],
+                    price=sw["level"], timestamp=candle.timestamp,
+                    description=f"[{symbol}] {sw['description']}",
+                )
+            for sig in detected_signals:
+                await self.db.log_signal(
+                    signal_type=sig.type.value, strength=sig.strength,
+                    price=sig.price, timestamp=sig.timestamp,
+                    description=f"[{symbol}] {sig.description}",
+                )
+        except Exception as e:
+            logger.warning(f"[{symbol}] Failed to log signals: {e}")
+
+        if not detected_signals and not sweeps:
+            return
+
+        # 2. Filters — block trade but NOT signal detection
         ks = self.kill_switch.should_allow_trade()
         if not ks["allowed"]:
             logger.warning(f"[{symbol}] {ks['reason']}")
             return
 
-        # 2. Session filter check
-        sess = self.session.should_trade()
-        if not sess["allowed"]:
-            logger.info(f"[{symbol}] Session blocked: {sess['reason']}")
-            return
-
-        # 3. Cooldown between trades (3 candles = 15 min)
         candles_since_trade = pipeline.candle_count - pipeline.last_trade_candle
         if pipeline.last_trade_candle > 0 and candles_since_trade < 3:
-            logger.info(f"[{symbol}] Cooldown: {3 - candles_since_trade} candle(s) remaining")
             return
-
-        # 4. Regime detection
-        all_candles = pipeline.footprint.get_last_n_candles(30)
-        regime = pipeline.regime.analyze(all_candles)
-        guidance = pipeline.regime.get_strategy_guidance()
 
         if not pipeline.regime.should_trade():
             logger.info(f"[{symbol}] Regime: {regime.value} — NO TRADE")
-            return
-
-        # 4. Update liquidity levels and detect sweeps
-        pipeline.liquidity.update_swings(all_candles)
-        prev = all_candles[-2] if len(all_candles) >= 2 else None
-        sweeps = pipeline.liquidity.detect(candle, prev)
-        for sw in sweeps:
-            logger.info(f"[{symbol}] SWEEP: {sw['description']}")
-            await self.db.log_signal(
-                signal_type=sw["type"], strength=sw["strength"],
-                price=sw["level"], timestamp=candle.timestamp,
-                description=f"[{symbol}] {sw['description']}",
-            )
-
-        # 5. Detect order flow signals
-        detected_signals = pipeline.signals.analyze(candle)
-
-        for sig in detected_signals:
-            await self.db.log_signal(
-                signal_type=sig.type.value, strength=sig.strength,
-                price=sig.price, timestamp=sig.timestamp,
-                description=f"[{symbol}] {sig.description}",
-            )
-
-        if not detected_signals and not sweeps:
             return
 
         # 6. Strategy evaluation
